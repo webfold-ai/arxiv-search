@@ -2,38 +2,68 @@
 
 ![arxiv-search artwork](assets/social-card.png)
 
-Rust MCP server for arXiv search and paper retrieval. The repository exposes several MCP tools and follows a split architecture:
+Search arXiv and retrieve prepared paper content through MCP. Retrieve paper metadata and text, prepare content for model ingestion, and perform document-routed retrieval. Run locally or build the Cloudflare Worker target (a reduced subset, see [Cloudflare Worker](#cloudflare-worker)).
 
-- `crates/native` for the local binary and stdio/SSE MCP transport
-- `crates/worker` for a Cloudflare Worker deploy path
-- `crates/core` for shared parsing and content-prep logic
+Start with a single paper retrieval (`retrieve_paper`). Indexing and document-routed retrieval (`ingest_corpus`, `hdrr`) are optional and only needed when you want to query across several papers.
 
-The main retrieval flow is designed for LLM ingestion: retrieve paper content directly from arXiv, prune noise, then chunk before handing it downstream.
+- **Retrieval for LLM ingestion:** fetches the paper from arXiv (HTML, falling back to PDF), prunes the reference list and boilerplate, and chunks the text. Math appears once as `$TeX$`.
+- **Document-routed retrieval:** an optional embedded SQLite index (`embedded-db` feature, on by default) supports two-stage retrieval: route to documents, then search chunks within them. Ranking is TF-IDF cosine similarity, not neural embeddings.
+- **Optional hierarchical segmentation:** `segmentation_k` on `retrieve_paper` clusters sentence-like segments (design references: arXiv:2507.09935 for segmentation, arXiv:2603.26815 for HDRR; not re-verified here).
+- **Local caching:** fetched HTML, PDF and metadata are cached on disk for 7 days in the OS cache directory (`~/.cache/mcp/` on Linux, `~/Library/Caches/org.arxiv-search.mcp/` on macOS); up to 64 prepared `retrieve_paper` responses are also kept in memory, so repeat requests skip HTTP and re-processing.
 
-- **Advanced RAG Engine:** Implements hierarchical text segmentation (arXiv:2507.09935) and Hybrid Document-Routed Retrieval (HDRR, arXiv:2603.26815) for high-precision retrieval.
-- **Embedded Database:** Optional `rusqlite` backend for document and chunk indexing, enabling stage-routed searches and cross-document synthesis.
-- **Cache TTL:** Automatic pruning of stale cache files to manage disk usage.
-- **Native OS Caching:** Caches fetched HTML/PDFs and metadata in the OS cache directory (`~/.cache/mcp/` on Linux, `~/Library/Caches/org.arxiv-search.mcp/` on macOS) and keeps prepared responses in memory, so repeat requests skip HTTP and re-processing entirely.
+Architecture, state, dependencies and the native-vs-Worker differences are described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Quick start
+
+Requires a Rust toolchain (stable) and network access to GitHub and crates.io for the build.
+
+```bash
+git clone https://github.com/webfold-ai/arxiv-search.git
+cd arxiv-search
+cargo build --release -p arxiv-search-rs-mcp
+# binary: target/release/arxiv-search-mcp
+```
+
+Register it with an MCP client. For Claude Code, add this to `.mcp.json` (use the absolute path to your build):
+
+```json
+{
+  "mcpServers": {
+    "arxiv-search": {
+      "command": "/absolute/path/to/arxiv-search/target/release/arxiv-search-mcp",
+      "args": ["--stdio"]
+    }
+  }
+}
+```
+
+Smoke test (no network needed): the server should answer `initialize` and list its tools.
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | target/release/arxiv-search-mcp --stdio 2>/dev/null
+```
+
+The second response lists `search`, `retrieve_paper`, `hdrr`, `execute` and `ingest_corpus`. Calling `search` or `retrieve_paper` also needs outbound access to arxiv.org.
+
+To have a coding agent do the install for you, see the [agent install prompt](docs/AGENT-INSTALL.md).
 
 ## Benchmarks
 
-Measured against [`arxiv-mcp-server`](https://github.com/blazickjp/arxiv-mcp-server) 0.7.2 on the same 8 papers, end to end over MCP stdio.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/arxiv/charts/summary-dark.svg">
-  <img alt="arxiv-search vs arxiv-mcp-server: times better per metric" src="benchmarks/arxiv/charts/summary-light.svg">
-</picture>
+Measured against [`arxiv-mcp-server`](https://github.com/blazickjp/arxiv-mcp-server) 0.7.2 on the workload in [`benchmarks/`](benchmarks/README.md): 8 pinned papers, end to end over MCP stdio. This is a single run on one machine (4 vCPU cloud container, outbound traffic via an HTTPS proxy, 2026-09-29, commit `e2b6621`), so treat the figures as indicative rather than general. Totals cover the 7 papers where both tools return the paper; the 8th (Adam, `1412.6980`) has a broken arXiv HTML page, which `arxiv-search` serves from the PDF.
 
 | | arxiv-search | arxiv-mcp-server 0.7.2 |
 |---|---:|---:|
-| First request, paper ID to full text (7 papers, total) | **4.1 s** | 12.2 s |
-| Repeat request (7 papers, total) | **14 ms** | 46 ms |
-| Tokens in context (7 papers, total) | **183,625** | 214,798 |
-| Peak memory | **23–25 MiB** | 81–432 MiB |
-| Startup | **88 ms** | 664 ms |
+| First request, paper ID to full text (7 papers, total) | 4.1 s | 12.2 s |
+| Repeat request (7 papers, total) | 14 ms | 46 ms |
+| Tokens in context (7 papers, total) | 183,625 | 214,798 |
+| Peak memory | 23-25 MiB | 81-432 MiB |
+| Startup | 88 ms | 664 ms |
 
-Charts, per-paper numbers, methodology, and a one-command reproduction are in [`benchmarks/`](benchmarks/README.md).
+Charts, per-paper numbers, methodology and a one-command reproduction are in [`benchmarks/`](benchmarks/README.md). The totals above are sums of per-paper medians from the raw results file in that directory.
 
 ## Tools
 
@@ -78,14 +108,23 @@ The response is compact JSON, with the paper text appearing exactly once:
 - `chunks`: `[start_char, end_char)` offsets into `pruned_markdown`, plus any hierarchy `context`
 
 ### `hdrr`
-Hybrid Document-Routed Retrieval. Two-stage retrieval that first routes to relevant documents and then performs scoped chunk searches.
+Hybrid Document-Routed Retrieval over papers you have already indexed. Stage 1 routes the query to the most relevant documents; stage 2 searches chunks only within those documents. Both stages rank by TF-IDF cosine similarity. Requires the `embedded-db` feature (on by default). Papers are indexed when you call `retrieve_paper` or `ingest_corpus`; with an empty index it returns no documents.
 
 ```json
 {"q":"transformer scaling laws","limit_docs":5,"limit_chunks":10}
 ```
 
+| Field | Type | Default | Description |
+|---|---|---:|---|
+| `q` | string | required | Query text |
+| `limit_docs` | integer | `5` | Max documents kept after routing |
+| `limit_chunks` | integer | `10` | Max chunks returned from the routed documents |
+
+### `ingest_corpus`
+Index several papers for `hdrr` without returning their text. Pass `{"paper_ids":["1706.03762","1810.04805"]}`; `prune_references`, `chunk_chars` and `chunk_overlap` behave as in `retrieve_paper`. The response reports `ingested`, `errors` and `total_requested`.
+
 ### `execute`
-Batch fetch abstracts, full text, citations, or recommendations.
+Single-paper operations selected by `op`: `abstract`, `download` (full text as markdown), `citations`, `recs` (the last two use Semantic Scholar) and `retrieve`. Pass `{"op":"abstract","id":"1706.03762"}`. Errors are returned inside the `result` field rather than as MCP errors.
 
 
 ## Local usage
@@ -94,78 +133,33 @@ Batch fetch abstracts, full text, citations, or recommendations.
 cargo run -p arxiv-search-rs-mcp -- --stdio
 ```
 
-Or run the SSE server:
+Or run the Streamable HTTP server (MCP 2025-03-26, `POST /mcp`; default `127.0.0.1:3000`):
 
 ```bash
 cargo run -p arxiv-search-rs-mcp -- --host 127.0.0.1 --port 3000
 ```
 
-## Agent install prompt
-
-Paste the block below into any coding-agent context (opencode, Claude Code,
-Codex, Cursor, etc.) to have the agent build, install, and wire the server as
-an MCP tool. Nothing else is needed — the prompt is self-contained.
-
-```text
-Install Ptyktos/arxiv-search as a local MCP server and register it in this
-session's agent config so I can search arXiv from future turns.
-
-Steps:
-1. Clone into a persistent location (skip if you already have a checkout):
-   `gh repo clone Ptyktos/arxiv-search ~/projects/arxiv-search`
-   Below, replace `<repo>` with that path.
-2. Build the native binary:
-   `cargo build --release --manifest-path <repo>/Cargo.toml --bin arxiv-search-mcp`
-3. Install it onto PATH:
-   `mkdir -p ~/.local/bin && cp <repo>/target/release/arxiv-search-mcp ~/.local/bin/`
-4. Register as an MCP server in this project's agent config:
-   - opencode: add to `~/.config/opencode/opencode.jsonc` (or project `.opencode/opencode.json`):
-       "mcp": {
-         "arxiv-search": {
-           "type": "local",
-           "command": ["/home/USER/.local/bin/arxiv-search-mcp", "--stdio"],
-           "enabled": true
-         }
-       }
-     Replace USER with `whoami`. Keep any pre-existing top-level keys; only add `mcp`.
-   - Claude Code: append to `.mcp.json`:
-       { "mcpServers": { "arxiv-search": { "command": "/home/USER/.local/bin/arxiv-search-mcp", "args": ["--stdio"] } } }
-5. Smoke test before telling me to restart. Run the binary with `--host 127.0.0.1 --port 8765`
-   in the background, then POST an `initialize` and a `tools/call` to `search`:
-     curl -sSi -X POST http://127.0.0.1:8765/mcp \
-       -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-       -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}'
-   Capture the `mcp-session-id` header, send `notifications/initialized`, then call:
-     {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search","arguments":{"q":"ti:test","n":1}}}
-   Expect a `papers` array in the response. Kill the background server.
-6. Tell me to restart the agent so the MCP server loads natively. After restart the
-   `search` / `retrieve_paper` / `hdrr` / `execute` tools will be first-class.
-
-When invoked natively the tool exposes four MCP tools — `search`, `retrieve_paper`,
-`hdrr`, `execute`. Query syntax is arXiv Lucene (`ti:`, `au:`, `abs:`, boolean
-`AND`/`OR`/`NOT`, quoted phrases). Cache lives at `~/.cache/mcp/` (Linux).
-```
+To build without the embedded database (no `hdrr`, no indexing), add `--no-default-features`.
 
 ## Cloudflare Worker
 
-The worker entrypoint lives in `crates/worker`.
+`crates/worker` is a separate Cargo workspace (it is not a member of the root workspace) that compiles to `wasm32-unknown-unknown`. It is a reduced subset of the native server:
+
+- Tools: `search_papers` and `retrieve_paper` only (no `hdrr`, `execute`, `ingest_corpus`, no `segmentation_k` or `full_payload`).
+- `retrieve_paper` uses arXiv HTML only; there is no PDF fallback, and paper metadata is not fetched (the title is the paper ID).
+- Endpoints: `POST /mcp`, `POST`/`GET /sse`, and `GET /` for service info.
+- No caching, and a best-effort 3 s pause between outbound arXiv requests within one isolate.
 
 ```bash
 cd crates/worker
 cargo check --target wasm32-unknown-unknown
 ```
 
-`wrangler.toml` is already set up for a `worker-build` deploy flow.
-
-## Architecture
-
-- `crates/core`: arXiv XML parsing, HTML-to-markdown conversion, PDF extraction, and chunk/prune helpers
-- `crates/native`: local MCP server with `rmcp`
-- `crates/worker`: Cloudflare Worker MCP endpoint with the same tool semantics
+No `wrangler.toml` is checked in, so deployment configuration (for example a `worker-build` setup) has to be supplied by you.
 
 ## Environment
 
 - `SEMANTIC_SCHOLAR_API_KEY`: raises Semantic Scholar rate limits for `citations` and `recs`
-- `HOST`: SSE bind host
-- `PORT`: SSE bind port
-- `RUST_LOG`: logging filter
+- `HOST`: HTTP bind host (same as `--host`)
+- `PORT`: HTTP bind port (same as `--port`)
+- `RUST_LOG`: logging filter (logs go to stderr)
