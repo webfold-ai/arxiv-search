@@ -6,8 +6,8 @@ use rmcp::{
     handler::server::wrapper::Parameters,
     model::{
         CallToolResult, ContentBlock, ListResourcesResult, PaginatedRequestParams,
-        ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents,
-        ServerCapabilities, ServerInfo,
+        ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+        ResourceContents, ServerCapabilities, ServerConfig,
     },
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
@@ -839,8 +839,8 @@ impl ArxivServer {
 #[expect(clippy::unused_async_trait_impl)]
 #[tool_handler]
 impl ServerHandler for ArxivServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
@@ -866,6 +866,7 @@ impl ServerHandler for ArxivServer {
                 .with_mime_type("application/yaml")
                 .with_size(OPENAPI_SPEC.len() as u64)],
             next_cursor: None,
+            ..Default::default()
         }))
     }
 
@@ -873,16 +874,16 @@ impl ServerHandler for ArxivServer {
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ReadResourceResult, McpError>> + Send + '_ {
+    ) -> impl Future<Output = Result<ReadResourceResponse, McpError>> + Send + '_ {
         let result = if request.uri == OPENAPI_URI {
-            Ok(ReadResourceResult::new(vec![
+            Ok(ReadResourceResponse::from(ReadResourceResult::new(vec![
                 ResourceContents::TextResourceContents {
                     uri: OPENAPI_URI.to_string(),
                     mime_type: Some("application/yaml".to_string()),
                     text: OPENAPI_SPEC.to_string(),
                     meta: None,
                 },
-            ]))
+            ])))
         } else {
             Err(McpError::resource_not_found(
                 format!("unknown resource: {}", request.uri),
