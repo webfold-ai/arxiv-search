@@ -65,7 +65,7 @@ fn ss_paper_to_paper(p: SsPaper) -> Option<Paper> {
             .collect(),
         abstract_text: String::new(),
         categories: Vec::new(),
-        published: p.year.map(|y| y.to_string()).unwrap_or_default(),
+        published: p.year.map_or_else(String::new, |y| y.to_string()),
         url,
         doi: p.external_ids.doi,
         journal_ref: None,

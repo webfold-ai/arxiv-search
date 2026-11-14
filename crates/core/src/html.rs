@@ -36,8 +36,9 @@ pub fn extract_metadata(html: &str) -> Option<HtmlMetadata> {
         .find("class=\"ltx_abstract\"")
         .and_then(|i| between(&html[i..], ">", "</div>"))
         .map(|a| collapse_ws(&decode_entities(&strip_tags(a))))
-        .map(|a| a.strip_prefix("Abstract").unwrap_or(&a).trim().to_string())
-        .unwrap_or_default();
+        .map_or_else(String::new, |a| {
+            a.strip_prefix("Abstract").unwrap_or(&a).trim().to_string()
+        });
     let authors = html
         .match_indices("class=\"ltx_personname\">")
         .filter_map(|(i, m)| {
