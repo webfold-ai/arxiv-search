@@ -6,3 +6,10 @@
 benchmarks/.cache/
 __pycache__/
 benchmarks/charts/target/
+
+# Agent scratch - never commit
+.harness/
+.box/
+.cache/
+*.pyc
+*.log
