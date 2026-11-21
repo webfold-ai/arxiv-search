@@ -16,5 +16,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 quick-xml = "0.41"
 htmd = "0.5"
-pdf-inspector = { git = "https://github.com/firecrawl/pdf-inspector", rev = "704ca588" }
+pdf-inspector = { git = "https://github.com/firecrawl/pdf-inspector", rev = "2e490045545f842167f2af52331ef55ab77b9819" }
 async-trait = "0.1.89"

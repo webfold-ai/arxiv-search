@@ -4,4 +4,7 @@
 ignore = [
   # ttf-parser unmaintained, no safe upgrade; transitive via pdf-inspector -> lopdf.
   "RUSTSEC-2026-0192",
+  # chrono unmaintained (2026-09-14), no patched version; required by lopdf, rmcp and schemars. Added 2026-11-22.
+  # Remove when none of them depends on chrono (`cargo tree -i chrono`).
+  "RUSTSEC-2026-0543",
 ]

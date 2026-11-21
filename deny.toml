@@ -9,6 +9,13 @@ ignore = [
   # pdf-inspector -> lopdf for PDF text extraction. Revisit if pdf-inspector
   # moves to skrifa or another maintained font parser.
   { id = "RUSTSEC-2026-0192", reason = "transitive via pdf-inspector/lopdf; no upgrade available" },
+  # chrono: RUSTSEC-2026-0543 (2026-09-14), informational "unmaintained", `patched = []`, all versions affected
+  # (https://github.com/chronotope/chrono/issues/1768); the advisory names jiff or time as alternatives.
+  # Impact: no vulnerability, a maintenance-status notice. chrono is required by lopdf 0.45 (via pdf-inspector),
+  # by rmcp 3.11 and by schemars 1.x (rmcp's chrono04 feature); none has a chrono-free release, so it cannot be
+  # replaced from this repository. Added 2026-11-22. Remove when lopdf, rmcp and schemars drop chrono (or
+  # RustSec marks a patched release): `cargo tree -i chrono` is the check.
+  { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no patched version; required by lopdf, rmcp and schemars (dated 2026-11-22)" },
 ]
 
 [licenses]
