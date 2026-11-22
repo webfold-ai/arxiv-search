@@ -7,8 +7,7 @@ use rmcp::{
     model::{
         CallToolResult, ContentBlock, ListResourcesResult, PaginatedRequestParams,
         ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-        ResourceContents,
-        ServerCapabilities, ServerInfo,
+        ResourceContents, ServerCapabilities, ServerInfo,
     },
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
@@ -858,13 +857,14 @@ impl ServerHandler for ArxivServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
-        std::future::ready(Ok(ListResourcesResult::with_all_items(vec![Resource::new(
-            OPENAPI_URI,
-            "arXiv MCP OpenAPI Schema",
-        )
-        .with_description("OpenAPI 3.0 schema for search, retrieve, and legacy execute inputs.")
-        .with_mime_type("application/yaml")
-        .with_size(OPENAPI_SPEC.len() as u64)])))
+        std::future::ready(Ok(ListResourcesResult::with_all_items(vec![
+            Resource::new(OPENAPI_URI, "arXiv MCP OpenAPI Schema")
+                .with_description(
+                    "OpenAPI 3.0 schema for search, retrieve, and legacy execute inputs.",
+                )
+                .with_mime_type("application/yaml")
+                .with_size(OPENAPI_SPEC.len() as u64),
+        ])))
     }
 
     fn read_resource(
