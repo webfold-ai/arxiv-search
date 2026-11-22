@@ -191,12 +191,8 @@ impl FetchClient {
                 .map(|c| re_strip.replace_all(&c[1], "").trim().to_string());
             let abstract_text = re_abstract
                 .captures(block)
-                .map(|c| re_strip.replace_all(&c[1], "").trim().to_string())
-                .unwrap_or_default();
-            let date = re_date
-                .captures(block)
-                .map(|c| c[1].to_string())
-                .unwrap_or_default();
+                .map_or_default(|c| re_strip.replace_all(&c[1], "").trim().to_string());
+            let date = re_date.captures(block).map_or_default(|c| c[1].to_string());
 
             let mut authors_xml = String::new();
             if let Some(auth_cap) = re_authors_block.captures(block) {
@@ -472,12 +468,8 @@ mod tests {
                 .map(|c| re_strip.replace_all(&c[1], "").trim().to_string());
             let abstract_text = re_abstract
                 .captures(block)
-                .map(|c| re_strip.replace_all(&c[1], "").trim().to_string())
-                .unwrap_or_default();
-            let date = re_date
-                .captures(block)
-                .map(|c| c[1].to_string())
-                .unwrap_or_default();
+                .map_or_default(|c| re_strip.replace_all(&c[1], "").trim().to_string());
+            let date = re_date.captures(block).map_or_default(|c| c[1].to_string());
 
             let mut authors = Vec::new();
             if let Some(auth_cap) = re_authors_block.captures(block) {
