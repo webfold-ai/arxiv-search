@@ -568,7 +568,7 @@ mod tests {
     fn parse_empty_feed() {
         let xml = r#"<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>"#;
         let response = parse_response(xml).expect("empty feed should parse");
-        assert!(response.papers.is_empty());
+        assert_eq!(response.papers.len(), 0);
     }
 
     #[test]
@@ -641,7 +641,7 @@ mod tests {
             vec!["University of A", "Institute of B"]
         );
         assert_eq!(p.authors[1].name, "Bob Jones");
-        assert!(p.authors[1].affiliations.is_empty());
+        assert_eq!(p.authors[1].affiliations.len(), 0);
     }
     #[test]
     fn test_sanitize_lucene_query() {
