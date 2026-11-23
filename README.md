@@ -1,20 +1,86 @@
-# arxiv-search-rs-mcp
+# arxiv-search
 
 ![arxiv-search artwork](assets/social-card.png)
 
-Rust MCP server for arXiv search and paper retrieval. The repository exposes several MCP tools and follows a split architecture:
+**Rust MCP server for arXiv search and paper retrieval.** One binary that exposes `search`,
+`retrieve_paper`, `hdrr` and `execute` over MCP, so a coding agent can put real paper text into
+context instead of a pasted PDF.
 
-- `crates/native` for the local binary and stdio/SSE MCP transport
-- `crates/worker` for a Cloudflare Worker deploy path
-- `crates/core` for shared parsing and content-prep logic
+[![CI](https://github.com/webfold-ai/arxiv-search/actions/workflows/ci.yml/badge.svg)](https://github.com/webfold-ai/arxiv-search/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/webfold-ai/arxiv-search)](https://scorecard.dev/viewer/?uri=github.com/webfold-ai/arxiv-search)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
+[![Tool reference](https://img.shields.io/badge/tools-4-blue.svg)](docs/agents/tools.md)
 
-The main retrieval flow is designed for LLM ingestion: retrieve paper content directly from arXiv, prune noise, then chunk before handing it downstream.
+The retrieval flow is designed for LLM ingestion: fetch paper content straight from arXiv, prune the
+noise, then chunk it before handing it downstream.
 
-- **Advanced RAG Engine:** Implements hierarchical text segmentation (arXiv:2507.09935) and Hybrid Document-Routed Retrieval (HDRR, arXiv:2603.26815) for high-precision retrieval.
-- **Embedded Database:** Optional `rusqlite` backend for document and chunk indexing, enabling stage-routed searches and cross-document synthesis.
-- **Cache TTL:** Automatic pruning of stale cache files to manage disk usage.
-- **Native OS Caching:** Caches fetched HTML/PDFs and metadata in the OS cache directory (`~/.cache/mcp/` on Linux, `~/Library/Caches/org.arxiv-search.mcp/` on macOS) and keeps prepared responses in memory, so repeat requests skip HTTP and re-processing entirely.
+- **Advanced RAG engine:** hierarchical text segmentation (arXiv:2507.09935) and Hybrid Document-Routed
+  Retrieval (HDRR, arXiv:2603.26815).
+- **Embedded database:** optional `rusqlite` backend for document and chunk indexing, enabling stage-routed
+  searches and cross-document synthesis.
+- **Cache TTL:** automatic pruning of stale cache files.
+- **Native OS caching:** fetched HTML/PDFs and metadata are cached in the OS cache directory
+  (`~/.cache/mcp/` on Linux, `~/Library/Caches/org.arxiv-search.mcp/` on macOS) and prepared responses are
+  kept in memory, so a repeat request skips HTTP and re-processing entirely.
 
+## Install
+
+```bash
+git clone https://github.com/webfold-ai/arxiv-search.git
+cd arxiv-search
+cargo build --release --bin arxiv-search-mcp
+# → target/release/arxiv-search-mcp
+```
+
+Register it with your agent (Claude Code, Codex, opencode, Cursor — the config key differs, the server
+entry does not):
+
+```json
+{"mcpServers": {"arxiv-search": {"command": "/absolute/path/to/arxiv-search/target/release/arxiv-search-mcp", "args": ["--stdio"]}}}
+```
+
+There is **no prebuilt release binary yet** — the first run compiles the workspace from source. The
+repository also ships a self-contained **[agent install prompt](#agent-install-prompt)** that clones, builds,
+installs, registers and smoke-tests the server for you.
+
+## Try it
+
+Search is one JSON-RPC call on stdio — no server to start, no session handshake:
+
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search","arguments":{"q":"ti:attention AND au:vaswani","n":3}}}' \
+  | ./target/release/arxiv-search-mcp --stdio
+```
+
+The response is a JSON-RPC result whose text content is a `papers` array — arXiv ids, titles, authors and
+abstracts for the three matches. To fetch and chunk a paper's full text:
+
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"retrieve_paper","arguments":{"paper_id":"1706.03762","chunk_chars":4000}}}' \
+  | ./target/release/arxiv-search-mcp --stdio
+```
+
+## What it does not do
+
+- **It only reads arXiv.** No local PDFs, no publisher paywalls, no general web crawl. `retrieve_paper`
+  takes an arXiv id (`1706.03762`, with or without the `arxiv:` prefix).
+- **It does not answer questions or summarise.** It returns text and metadata; the model in your agent does
+  the reasoning.
+- **It is not a hosted service.** The local binary is the product; the Cloudflare Worker path is the same
+  tools over a different transport, not a managed offering.
+
+## If it fails
+
+| symptom | cause | fix |
+|---|---|---|
+| `citations` / `recs` fail or get rate-limited | Semantic Scholar's unauthenticated limit | set `SEMANTIC_SCHOLAR_API_KEY` (`crates/native/src/fetch.rs:393`); arXiv search and retrieval are unaffected |
+| the tool does not appear in your agent | the server was started with `--host`/`--port` but the agent expects stdio | register the binary with `"args": ["--stdio"]` (see [Install](#install)) |
+| results look stale after an upgrade | the OS cache holds prepared responses | delete `~/.cache/mcp` (Linux) or `~/Library/Caches/org.arxiv-search.mcp` (macOS) |
+| the worker build fails | missing target | `rustup target add wasm32-unknown-unknown` |
+
+Full tool reference: [`docs/agents/tools.md`](docs/agents/tools.md) · agent usage patterns:
+[`docs/agents/rag_patterns.md`](docs/agents/rag_patterns.md) · repository layout: [Architecture](#architecture).
 
 ## Benchmarks
 
