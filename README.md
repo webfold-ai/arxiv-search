@@ -40,26 +40,37 @@ entry does not):
 {"mcpServers": {"arxiv-search": {"command": "/absolute/path/to/arxiv-search/target/release/arxiv-search-mcp", "args": ["--stdio"]}}}
 ```
 
-There is **no prebuilt release binary yet** — the first run compiles the workspace from source. The
+There is **no prebuilt release binary yet** — the first run compiles the workspace from source (measured:
+**9 m 55 s** for a cold release build of the whole workspace on x86-64 Linux; dependencies dominate). The
 repository also ships a self-contained **[agent install prompt](#agent-install-prompt)** that clones, builds,
 installs, registers and smoke-tests the server for you.
 
 ## Try it
 
-Search is one JSON-RPC call on stdio — no server to start, no session handshake:
+The server speaks MCP over stdio, so it needs the usual three-step handshake. That is the whole thing —
+no daemon to start, no session to manage:
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search","arguments":{"q":"ti:attention AND au:vaswani","n":3}}}' \
-  | ./target/release/arxiv-search-mcp --stdio
+{
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"demo","version":"1"}}}'
+  printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search","arguments":{"q":"ti:attention AND au:vaswani","n":3}}}'
+} | ./target/release/arxiv-search-mcp --stdio
 ```
 
-The response is a JSON-RPC result whose text content is a `papers` array — arXiv ids, titles, authors and
-abstracts for the three matches. To fetch and chunk a paper's full text:
+Expected — the initialize result, then the search result whose text content is a `papers` array:
 
-```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"retrieve_paper","arguments":{"paper_id":"1706.03762","chunk_chars":4000}}}' \
-  | ./target/release/arxiv-search-mcp --stdio
+```json
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"arxiv-search-mcp","version":"0.1.0"}}}
+{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"papers\":[{\"id\":\"2110.01001\",\"title\":\"Multimodal Fusion Based Attentive Networks for Sequential Music Recommendation\", ..."}]}]}}
 ```
+
+Swap `search` for `retrieve_paper` and the arguments for `{"paper_id":"1706.03762","chunk_chars":4000}`
+to fetch and chunk a paper's full text; the response then carries `paper`, `pruned_markdown` and a
+`chunks` array of `{start_char, end_char, index}` offsets.
+
+> The `initialize` request is not optional: the transport rejects a bare tool call with
+> `expect initialized request, but received: …`.
 
 ## What it does not do
 
