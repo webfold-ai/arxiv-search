@@ -45,7 +45,7 @@ impl FetchClient {
             .timeout(Duration::from_secs(15))
             .connect_timeout(Duration::from_secs(5))
             .pool_idle_timeout(Duration::from_secs(90))
-            .tcp_keepalive(Some(Duration::from_secs(60)))
+            .tcp_keepalive(Some(Duration::from_mins(1)))
             .build()
             .context("failed to build HTTP client")?;
         let cache = ArxivCache::new(DEFAULT_CACHE_TTL).await?;
