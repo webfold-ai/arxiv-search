@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn parse_empty_citations() {
         let papers = parse_citations(EMPTY_CITATIONS).expect("empty citations should parse");
-        assert!(papers.is_empty());
+        assert_eq!(papers.len(), 0);
     }
 
     #[test]
