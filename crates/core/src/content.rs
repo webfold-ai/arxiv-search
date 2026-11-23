@@ -603,6 +603,6 @@ mod tests {
         );
         assert_eq!(prepared.source, "html");
         assert_eq!(prepared.pruned_markdown, "Intro");
-        assert!(!prepared.chunks.is_empty());
+        assert_ne!(prepared.chunks.len(), 0);
     }
 }

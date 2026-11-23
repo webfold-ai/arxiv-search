@@ -65,7 +65,7 @@ fn ss_paper_to_paper(p: SsPaper) -> Option<Paper> {
             .collect(),
         abstract_text: String::new(),
         categories: Vec::new(),
-        published: p.year.map(|y| y.to_string()).unwrap_or_default(),
+        published: p.year.map_or_else(String::new, |y| y.to_string()),
         url,
         doi: p.external_ids.doi,
         journal_ref: None,
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn parse_empty_citations() {
         let papers = parse_citations(EMPTY_CITATIONS).expect("empty citations should parse");
-        assert!(papers.is_empty());
+        assert_eq!(papers.len(), 0);
     }
 
     #[test]
